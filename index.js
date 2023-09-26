@@ -14,7 +14,7 @@ const port = process.env.PORT || 5000;
  * __________________________________________
  */
 const corsOptions = {
-  origin: [ 'http://192.168.0.102:5173', 'http://localhost:5173'],
+  origin: ['http://192.168.0.102:5173', 'http://localhost:5173'],
   credentials: true,
 };
 
@@ -28,11 +28,12 @@ app.use((req, res, next) => {
 
 
 const verifyJWT = (req, res, next) => {
-  console.log(req.cookies)
+  // console.log(req.cookies)
   // console.log('header ',req.headers)
   const authorization = req.headers.authorization;
-  console.log('auth ',authorization)
+  // console.log('auth ',authorization)
   if (!authorization) {
+    console.log("auth paini for" , req.path)
     return res.status(401).send({ error: true, message: "Unauthorized Access" });
   }
 
@@ -40,9 +41,10 @@ const verifyJWT = (req, res, next) => {
   const token = authorization.split(' ')[1];
   jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
     if (err) {
+      console.log("auth invalid")
       return res.status(403).send({ error: true, message: "Unauthorized Access || Invalid Token" });
     }
-
+    // console.log("error hoyn")
     req.decoded = decoded;
     next();
 
@@ -82,7 +84,17 @@ async function run() {
     const cartCollection = database.collection("cartCollection");
     const usersCollection = database.collection("usersCollection");
 
+    /** admin verify */
 
+    const verifyAdmin = async (req, res, next) => {
+      const email = req.decoded.email;
+      const existedUser = await usersCollection.findOne({ email: email });
+      if (existedUser?.role !== "Admin") {
+        console.log(email,' is not an admin ')
+        return res.status(403).send({ msg: 'Forbidden by middle ware check' })
+      }
+      next();
+    }
 
     // jwt 
     app.post('/jwt', async (req, res) => {
@@ -120,15 +132,15 @@ async function run() {
 
 
     // fetch data  
-    app.get('/carts', verifyJWT,async (req, res) => {
+    app.get('/carts', verifyJWT, async (req, res) => {
       const email = req.query.email;
       if (!email) {
-      return  res.send([]);
-        
+        return res.send([]);
+
       }
 
-      if(email !== req.decoded?.email){
-        return res.status(403).status({message : "Forbidden "})
+      if (email !== req.decoded?.email) {
+        return res.status(403).status({ message: "Forbidden " })
       }
       const result = await cartCollection.find({ email: email }).toArray();
 
@@ -171,14 +183,19 @@ async function run() {
 
 
     /** 
-     * 
+     * _________________________________________________________________________
+     * _________________________________________________________________________
      * ___________________________USER PROFILE HANDLE __________________________ 
-     * 
+     * _________________________________________________________________________
+     * _________________________________________________________________________
+     * get '/users'                => get all the user
+     * post /users                 => create a unique user in db
+     * patch /users/admin/:_id     => make a user to admin
      **/
 
 
     // get all the users 
-    app.get('/users', verifyJWT, async (req, res) => {
+    app.get('/users', verifyJWT, verifyAdmin, async (req, res) => {
       try {
         const users = await usersCollection.find().sort({ _id: -1 }).toArray();
         res.status(200).send({ users: users });
@@ -193,12 +210,12 @@ async function run() {
     app.post('/users', async (req, res) => {
       const user = req.body;
       try {
-
+        console.log(user)
         const existed = await usersCollection.findOne({ email: req.body?.email });
         if (existed) {
           return res.status(200).send({ msg: 'already saved' })
         }
-        if(!req.body){
+        if (!req.body) {
           return res.status(400).send({ msg: 'No data given' })
         }
         const result = await usersCollection.insertOne(user);
@@ -228,6 +245,33 @@ async function run() {
         }
       }
     })
+
+
+
+    // check a user to Admin
+    app.get('/users/admin/:email', verifyJWT, async (req, res) => {
+      const email = req.params.email;
+      if (req.decoded?.email !== email) {
+        return res.send({ admin: false })
+      }
+      try {
+
+        const existedUser = await usersCollection.findOne({ email: email });
+        if (!existedUser) {
+          return res.send({ admin: false })
+        }
+        const result = { admin: existedUser?.role === "Admin" };
+
+        res.status(200).send(result);
+      } catch {
+        e => {
+          res.status(500).send({ msg: "internal server errro" })
+        }
+      }
+    })
+
+
+
 
 
   } finally {
