@@ -1,6 +1,8 @@
 const express = require('express');
 const app = express();
 const cors = require('cors');
+const jwt = require('jsonwebtoken');
+const cookieParser = require("cookie-parser");
 require('dotenv').config();
 const port = process.env.PORT || 5000;
 
@@ -12,7 +14,7 @@ const port = process.env.PORT || 5000;
  * __________________________________________
  */
 const corsOptions = {
-  origin: ['*', 'http://192.168.0.102:5173', 'http://localhost:5173'],
+  origin: [ 'http://192.168.0.102:5173', 'http://localhost:5173'],
   credentials: true,
 };
 
@@ -25,15 +27,39 @@ app.use((req, res, next) => {
 });
 
 
+const verifyJWT = (req, res, next) => {
+  console.log(req.cookies)
+  // console.log('header ',req.headers)
+  const authorization = req.headers.authorization;
+  console.log('auth ',authorization)
+  if (!authorization) {
+    return res.status(401).send({ error: true, message: "Unauthorized Access" });
+  }
+
+  //bearer token
+  const token = authorization.split(' ')[1];
+  jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
+    if (err) {
+      return res.status(403).send({ error: true, message: "Unauthorized Access || Invalid Token" });
+    }
+
+    req.decoded = decoded;
+    next();
+
+  })
+
+}
+
 
 app.use(cors(corsOptions));
 app.use(express.json());
+app.use(cookieParser());
 
 /**
  * _________________________________________________________________________________________________________________
  */
 
-const { MongoClient, ServerApiVersion } = require('mongodb');
+const { MongoClient, ServerApiVersion, ObjectId, Admin } = require('mongodb');
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@trial01.9ddajtx.mongodb.net/?retryWrites=true&w=majority`;
 
 // Create a MongoClient with a MongoClientOptions object to set the Stable API version
@@ -54,7 +80,23 @@ async function run() {
     const menuCollection = database.collection("menuCollection");
     const reviewsCollection = database.collection("reviewsCollection");
     const cartCollection = database.collection("cartCollection");
+    const usersCollection = database.collection("usersCollection");
 
+
+
+    // jwt 
+    app.post('/jwt', async (req, res) => {
+      const user = req.body;
+      const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, { expiresIn: '1h' });
+      res.cookie("_at", token, {
+        httpOnly: true,
+        secure: true,
+        sameSite: "none",
+        expires: new Date(Date.now() + 8 * 60 * 60 * 1000),
+      });
+      res.send({ token })
+
+    })
 
     app.get('/menu', async (req, res) => {
       const result = await menuCollection.find().toArray();
@@ -78,26 +120,30 @@ async function run() {
 
 
     // fetch data  
-    app.get('/carts',async (req,res)=>{
+    app.get('/carts', verifyJWT,async (req, res) => {
       const email = req.query.email;
-      if(!email){
-        res.send([]);
-        return;
+      if (!email) {
+      return  res.send([]);
+        
       }
-      const result =await cartCollection.find({ email : email}).toArray();
-  
+
+      if(email !== req.decoded?.email){
+        return res.status(403).status({message : "Forbidden "})
+      }
+      const result = await cartCollection.find({ email: email }).toArray();
+
       res.send(result)
 
     })
+
+
     app.post('/carts', async (req, res) => {
       const item = req.body;
-
       if (!item) {
         res.status(400).send({ message: 'no item added' });
         return;
 
       }
-
       try {
         const data = await cartCollection.insertOne(item);
         res.send(data);
@@ -106,8 +152,83 @@ async function run() {
           res.status(500).send(false)
         }
       }
+    })
+
+
+    // delete a cart item 
+    app.delete('/carts/:id', async (req, res) => {
+      try {
+        const id = req.params.id
+        const result = await cartCollection.deleteOne({ _id: new ObjectId(id) });
+        res.status(200).send(result)
+      } catch {
+        e => {
+          res.status(500).send(false)
+        }
+      }
 
     })
+
+
+    /** 
+     * 
+     * ___________________________USER PROFILE HANDLE __________________________ 
+     * 
+     **/
+
+
+    // get all the users 
+    app.get('/users', verifyJWT, async (req, res) => {
+      try {
+        const users = await usersCollection.find().sort({ _id: -1 }).toArray();
+        res.status(200).send({ users: users });
+      } catch {
+        e => {
+          res.status(500).send({ msg: "internal server errro" })
+        }
+      }
+    })
+
+    //create a  user to db 
+    app.post('/users', async (req, res) => {
+      const user = req.body;
+      try {
+
+        const existed = await usersCollection.findOne({ email: req.body?.email });
+        if (existed) {
+          return res.status(200).send({ msg: 'already saved' })
+        }
+        if(!req.body){
+          return res.status(400).send({ msg: 'No data given' })
+        }
+        const result = await usersCollection.insertOne(user);
+        res.status(200).send(result);
+      } catch {
+        e => {
+          res.status(500).send({ msg: "internal server errro" })
+        }
+      }
+    })
+
+
+    // make a user to Admin
+    app.patch('/users/admin/:_id', async (req, res) => {
+      const user_id = req.params._id;
+      try {
+
+        const existed = await usersCollection.findOne({ _id: new ObjectId(user_id) });
+        if (!existed) {
+          return res.status(404).send({ msg: 'not found ' })
+        }
+        const result = await usersCollection.updateOne({ _id: new ObjectId(user_id) }, { $set: { role: "Admin" } });
+        res.status(200).send(result);
+      } catch {
+        e => {
+          res.status(500).send({ msg: "internal server errro" })
+        }
+      }
+    })
+
 
   } finally {
     // Ensures that the client will close when you finish/error
