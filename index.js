@@ -7,6 +7,10 @@ require('dotenv').config();
 const port = process.env.PORT || 5000;
 
 
+// This is your test secret API key.
+const stripe = require("stripe")(process.env.PK_KEY);
+
+app.use(express.static("public"));
 
 /**
  * ________________________________________
@@ -14,7 +18,7 @@ const port = process.env.PORT || 5000;
  * __________________________________________
  */
 const corsOptions = {
-  origin: ['http://192.168.0.102:5173', 'http://localhost:5173'],
+  origin: ['http://192.168.0.102:5173', 'http://localhost:5173', 'http://localhost:3000'],
   credentials: true,
 };
 
@@ -33,7 +37,7 @@ const verifyJWT = (req, res, next) => {
   const authorization = req.headers.authorization;
   // console.log('auth ',authorization)
   if (!authorization) {
-    console.log("auth paini for" , req.path)
+    console.log("auth paini for", req.path)
     return res.status(401).send({ error: true, message: "Unauthorized Access" });
   }
 
@@ -83,6 +87,7 @@ async function run() {
     const reviewsCollection = database.collection("reviewsCollection");
     const cartCollection = database.collection("cartCollection");
     const usersCollection = database.collection("usersCollection");
+    const paymentCollection = database.collection("payments");
 
     /** admin verify */
 
@@ -90,7 +95,7 @@ async function run() {
       const email = req.decoded.email;
       const existedUser = await usersCollection.findOne({ email: email });
       if (existedUser?.role !== "Admin") {
-        console.log(email,' is not an admin ')
+        console.log(email, ' is not an admin ')
         return res.status(403).send({ msg: 'Forbidden by middle ware check' })
       }
       next();
@@ -112,6 +117,15 @@ async function run() {
 
     app.get('/menu', async (req, res) => {
       const result = await menuCollection.find().toArray();
+
+      res.status(200).json(result);
+    })
+
+    //delete a menu
+    app.delete('/menu/:id', verifyJWT, verifyAdmin, async (req, res) => {
+      const menuID = req.params.id;
+      console.log(menuID)
+      const result = await menuCollection.deleteOne({ _id: new ObjectId(menuID) });
       res.status(200).json(result);
     })
 
@@ -267,6 +281,187 @@ async function run() {
         e => {
           res.status(500).send({ msg: "internal server errro" })
         }
+      }
+    })
+
+
+    /**
+     * _________________________________
+     * ______________ UPLOAD MENU_______
+     */
+    app.post('/add-items', verifyJWT, verifyAdmin, async (req, res) => {
+      const menudata = req.body;
+      try {
+
+
+        if (!req.body) {
+          return res.status(400).send({ msg: 'No data given' })
+        }
+        const result = await menuCollection.insertOne(menudata);
+        res.status(200).send(result);
+      } catch {
+        e => {
+          res.status(500).send({ msg: "internal server errro" })
+        }
+      }
+    })
+
+    /**
+     * _______________________________________________________________________
+     * _______________ ORDER MANAGMENT ______________________________________
+     * "/payment-intenet"   payment gateway
+     */
+
+
+    // payment gateway 
+    app.post("/create-payment-intent", verifyJWT, async (req, res) => {
+      const { price } = req.body;
+
+      const ammount = parseInt(price * 100);
+
+
+      // Create a PaymentIntent with the order amount and currency
+      const paymentIntent = await stripe.paymentIntents.create({
+        amount: ammount,
+        currency: "usd",
+
+        // In the latest version of the API, specifying the `automatic_payment_methods` parameter is optional because Stripe enables its functionality by default.
+        automatic_payment_methods: {
+          enabled: true,
+        },
+      });
+
+      res.send({
+        clientSecret: paymentIntent.client_secret,
+      });
+    });
+
+    //payment after order
+    app.post("/payments", verifyJWT, async (req, res) => {
+      const data = req.body;
+
+      const {
+        email,
+        transaction_method_email,
+        transaction_method_name,
+        transaction_method_phone,
+        transactionID,
+        intent_methodID,
+        methodID,
+        price,
+        orderLength,
+        cartID,
+        menuItems,
+        itemsName,
+        date,
+        status } = data;
+
+      const serverData = {
+        email,
+        transaction_method_email,
+        transaction_method_name,
+        transaction_method_phone,
+        transactionID,
+        intent_methodID,
+        methodID,
+        price,
+        orderLength,
+        menuItems,
+        itemsName,
+        date,
+        status
+      }
+
+      serverData.menuItems = await menuItems.map(i => new ObjectId(i))
+      const result = await paymentCollection.insertOne(serverData);
+
+      const query = { _id: { $in: cartID.map(id => new ObjectId(id)) } };
+      const deleteResult = await cartCollection.deleteMany(query)
+      res.send({ result: result, deleteResult })
+    });
+
+    //______________________________________________ admin dashboard __________________________
+
+
+    // get the stat 
+    app.get('/admin-stat', async (req, res) => {
+      const users = await usersCollection.estimatedDocumentCount();
+      const products = await menuCollection.estimatedDocumentCount();
+      const orders = await paymentCollection.estimatedDocumentCount();
+
+
+      // best way to get sum of a field is to use group 
+      const total = await paymentCollection.aggregate([
+        {
+          $group: {
+            _id: null,
+            total: { $sum: '$price' }
+          }
+        }
+      ]).toArray();
+
+
+      const data = {
+        users,
+        products,
+        orders,
+        total: total[0]?.total
+      }
+      res.status(200).send(data)
+    })
+    /**
+        * ---------------
+        * BANGLA SYSTEM(second best solution)
+        * ---------------
+        * 1. load all payments
+        * 2. for each payment, get the menuItems array
+        * 3. for each item in the menuItems array get the menuItem from the menu collection
+        * 4. put them in an array: allOrderedItems
+        * 5. separate allOrderedItems by category using filter
+        * 6. now get the quantity by using length: pizzas.length
+        * 7. for each category use reduce to get the total amount spent on this category
+        * 
+       */
+    app.get('/order-status', async (req, res) => {
+
+      try {
+        const pipeline = [
+         
+          {
+            $lookup: {
+              from: 'menuCollection',
+              foreignField: '_id',
+              localField: 'menuItems',
+              as: 'data'
+            }
+          },
+          {
+            $unwind: '$data'
+          },
+          {
+            $group: {
+              _id: '$data.category',
+              count: { $sum: 1 },
+              total: { $sum: '$data.price' }
+            }
+          },
+          {
+            $project: {
+              category: '$_id',
+              count: 1,
+              total: { $round: ['$total', 2] },
+              _id: 0
+            }
+          }
+        ];
+
+
+        const results = await paymentCollection.aggregate(pipeline).toArray();
+        console.log(results)
+        res.json(results);
+      } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Internal Server Error" });
       }
     })
 
