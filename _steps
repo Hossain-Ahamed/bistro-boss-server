@@ -1,0 +1,23 @@
+1. write vercel.json file 
+
+    {
+    "version": 2,
+    "builds": [
+        {
+            "src": "./index.js",
+            "use": "@vercel/node"
+        }
+    ],
+    "routes": [
+        {
+            "src": "/(.*)",
+            "dest": "/",
+            "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+        }
+    ]
+}
+
+2. vercel setup 
+3. .env file upload in vercel
+4. Comment   await client.connect();  in code
+5. vercel --prod

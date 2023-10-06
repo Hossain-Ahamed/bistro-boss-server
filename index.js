@@ -18,7 +18,7 @@ app.use(express.static("public"));
  * __________________________________________
  */
 const corsOptions = {
-  origin: ['http://192.168.0.102:5173', 'http://localhost:5173', 'http://localhost:3000'],
+   origin: ['http://192.168.0.102:5173', 'http://localhost:5173', 'http://localhost:3000', 'https://bistro-boss-server-hossain-ahamed.vercel.app','',process.env.clientURL],
   credentials: true,
 };
 
@@ -65,7 +65,7 @@ app.use(cookieParser());
  * _________________________________________________________________________________________________________________
  */
 
-const { MongoClient, ServerApiVersion, ObjectId, Admin } = require('mongodb');
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@trial01.9ddajtx.mongodb.net/?retryWrites=true&w=majority`;
 
 // Create a MongoClient with a MongoClientOptions object to set the Stable API version
@@ -80,14 +80,14 @@ const client = new MongoClient(uri, {
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
-    await client.connect();
+    await client.connect(); 
     // Send a ping to confirm a successful connection
     const database = client.db("bistro-db");
-    const menuCollection = database.collection("menuCollection");
-    const reviewsCollection = database.collection("reviewsCollection");
-    const cartCollection = database.collection("cartCollection");
-    const usersCollection = database.collection("usersCollection");
-    const paymentCollection = database.collection("payments");
+    const menuCollection = client.db("bistro-db").collection("menuCollection");
+    const reviewsCollection = client.db("bistro-db").collection("reviewsCollection");
+    const cartCollection = client.db("bistro-db").collection("cartCollection");
+    const usersCollection = client.db("bistro-db").collection("usersCollection");
+    const paymentCollection = client.db("bistro-db").collection("payments");
 
     /** admin verify */
 
@@ -116,7 +116,9 @@ async function run() {
     })
 
     app.get('/menu', async (req, res) => {
+
       const result = await menuCollection.find().toArray();
+
 
       res.status(200).json(result);
     })
@@ -426,7 +428,7 @@ async function run() {
 
       try {
         const pipeline = [
-         
+
           {
             $lookup: {
               from: 'menuCollection',
@@ -466,8 +468,14 @@ async function run() {
     })
 
 
+    app.get('/my-orders/:mail', verifyJWT, async (req, res) => {
+      const mail = req.params.mail;
 
+      const orders = await paymentCollection.find({ email: mail }).toArray();
+      res.send(orders)
+    })
 
+  
 
   } finally {
     // Ensures that the client will close when you finish/error
@@ -478,9 +486,21 @@ run().catch(console.dir);
 
 
 app.get('/', (req, res) => {
-  res.send('bistro boss');
+  res.send({ data: 'bistro boss'});
 })
+app.get('/alu-parata', (req, res) => {
 
+  const data = {
+    DB_USER: process.env.DB_USER,
+    DB_PASS: process.env.DB_PASS,
+    ACCESS_TOKEN_SECRET: process.env.ACCESS_TOKEN_SECRET,
+
+    PK_KEY: process.env.PK_KEY,
+
+    clientURL: process.env.clientURL,
+  }
+  res.send({ data: 'alu parata', key: process.env.PK_KEY, ...data });
+})
 
 app.listen(port, () => {
   console.log('port choling ', port)
