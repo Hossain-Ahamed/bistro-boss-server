@@ -18,7 +18,7 @@ app.use(express.static("public"));
  * __________________________________________
  */
 const corsOptions = {
-   origin: ['http://192.168.0.102:5173', 'http://localhost:5173', 'http://localhost:3000', 'https://bistro-boss-server-hossain-ahamed.vercel.app','',process.env.clientURL],
+   origin: ['http://192.168.0.102:5173', 'http://localhost:5173', 'http://localhost:3000', 'https://bistro-boss-server-hossain-ahamed.vercel.app','https://bistro-boss-restaurant-by-zombie.firebaseapp.com','https://bistro-boss-restaurant-by-zombie.web.app'],
   credentials: true,
 };
 
